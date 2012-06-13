@@ -1,0 +1,54 @@
+Seven packages.  This is to replace binutils and gcc.
+
+FWL needs: ar as nm cc gcc make ld
+  - Why gcc (shouldn't cc cover it?  What builds?)
+  - Need a make.  Separate issue, busybox probably.
+
+Loot tinycc fork to provide:
+
+  cc - front-end option parsing
+    multiplexer (swiss-army-executable ala busybox)
+      cross-prefix, so check last few chars: cc,ld,ar,as,nm
+
+    Calls several automatically (assembler, compiler, linker) as necessary.
+      Pass on linker options via -Wl,
+
+    Merge in FWL wrapper stuff (ccwrap.c)
+      call out again?  distcc support?
+
+    Path logic:
+      compiler includes: ../qcc/include
+      system includes: ../include
+      compiler libraries: ../qcc/lib
+      system libraries: ../lib
+      tools: built-in (or shell out with same prefix via $PATH)
+      command line stuff: current directory
+
+  ld - linker
+    #include <elf.h> which qemu already has.
+    Support for .o, .a, .so -> exe, .so
+    Support for linker scripts
+
+  ar - library archiver
+    Busybox has partial support (still read-only?)
+    ranlib?
+
+  cc1 - compiler
+    preprocessor (-E) support
+    output (.c->.o) support
+
+  as - assembler
+
+  nm - needed to build something?
+
+binutils provides:
+  ar as nm ld - already covered
+  strip, ranlib, addr2line, size, objdump, objcopy - low hanging fruit
+  readelf - uClibc has one
+  strings - busybox provides one 
+
+  Probably not worth it:
+    gprof - profiling support (optional)
+    c++filt - C++ and Java, not C.
+    windmc, dlltool - Windows only (why is it installed on Linux?)
+    nlmconv - Novell Netware only (why is this installd on Linux?)

@@ -1,0 +1,210 @@
+QCC - QEMU C Compiler.
+
+  Use QEMU's Tiny Code Generator as a backend for a compiler based on my old
+  fork of Fabrice Bellard's tinycc project.
+
+Why?
+
+  QEMU's TCG provides support for many different targets (x86, x86-64, arm,
+  mips, ppc, sh4, sparc, alpha, m68k, cris).  It has an active development
+  community upgrading and optimizing it.
+
+  QEMU application emulation also provides existing support for various ELF
+  executable and library formats, so linking logic can presumably be merged.
+  (See elf.h at the top of qemu.)  QEMU is also likely to grow coff and pxe
+  support in future.
+
+Building a self-bootstrapping system:
+
+  My Firmware Linux project builds the smallest self-bootstrapping system
+  I could come up with using the following existing packages:
+
+    gcc, binutils, make, bash, busybox, uClibc, linux
+
+  This new compiler should replace both binutils and gcc above.  (As a smoke
+  test, the new system should still be able to build all seven packages.)
+
+  To build those packages, FWL needs the following commands from the host
+  toolchain.  (It can build everything else from source, but building these
+  without already having them is a chicken and egg problem.)
+
+    ar as nm cc gcc make ld /bin/bash
+
+  The reason it needs "gcc" is that the linux and uClibc packages assume
+  their host compiler is named "gcc", and call that name instead of cc even
+  when it's not there.  (You can mostly override this by specifying HOSTCC=$CC
+  on the make command line, although a few places need actual source patches.)
+
+  Ignoring gcc, make, and bash, this leaves "ar, as, nm, cc, and ld" as
+  commands qcc needs to provide for a minimal self-bootstrapping system.
+
+  Note that the above set of tools is specifically enough to build a fresh
+  compiler.  When building a linux kernel, creating a bzImage requires objcopy,
+  building qemu requires strip, etc.
+
+What commands does the current gcc/binutils combo provide?
+
+  gcc 4.1 provides the commands:
+    cc/gcc - C compiler
+    cpp - C preprocessor (equivalent to cc -E)
+    gcov - coverage tester (optional debugging tool)
+
+    Of these, cc is required, cpp is low hanging fruit, and gcov is probably
+    unnecessary.
+
+  Binutils provides:
+    ar - archiver, creates .a files.
+    ranlib - generate index to .a archive (equivalent to ar -s)
+    as - assembler
+    ld - linker
+    strip - discard symbols from object files (equilvalent to ld -S)
+    nm - list symbols from ELF files.
+    size - show ELF section sizes
+    objdump - show contents of ELF files
+    objcopy - copy/translate ELF files
+    readelf - show contents of ELF files
+    addr2line - convert addresses to filename/line number (optional debug tool)
+    strings - show printable characters from binary file
+    gprof - profiling support (optional)
+    c++filt - C++ and Java, not C.
+    windmc, dlltool - Windows only (why is it installed on Linux?)
+    nlmconv - Novell Netware only (why is this installd on Linux?)
+
+    Of these, ar, as, ld, and nm are needed, ranlib, strip, addr2line, and
+    size are low hanging fruit, size, objdump, obcopy, and readelf are
+    variants of the same logic as nm, and gprof, c++filt, windmc, dlltool,
+    and nlmconv are probably unnecessary.
+
+Standards:
+
+  The following utilities have SUSv4 pages describing their operation, at
+  http://www.opengroup.org/onlinepubs/9699919799/utilities
+
+    ar, c99, nm, strings
+
+  This means the following don't:
+
+    ld, cpp, as, ranlib, strip, size, readelf, objdump, objcopy, addr2line
+
+  (There isn't a "cc" standard, but you can probably use "c99" for that.)
+
+Existing code:
+
+  multiplexer:
+
+    The compiler must be provide several different names, yet the same
+    functionality must be callable from a single compiler executable,
+    assembling when it encounters embedded assembler, passing on linker
+    options via "-Wl," to the linking stage, and so on.
+
+    The easy way to do this is for the qcc executable to be a swiss-army-knife
+    executable, like busybox.  It needs a command multiplexer which can figure
+    out which name it was called under and change behavior appropriately, to
+    act as a compiler, assembler, linker, and so on.
+
+    This multiplexer should accept arbitrary prefixes, so cross compiler names
+    such as "i686-cc" work.  This means instead of matching entire known names,
+    the multiplexer should checks that commands _end_  with recognized strings.
+    (This would not only allow it to be called as both "qcc" and "cc", but
+    would have the added bonus of making "gcc" work like "cc" as well.)
+
+    Both busybox and tinycc already handle this.  Pretty straightforward.
+
+  cc/c99 - front-end option parsing
+
+    Both tinycc's options.c and ccwrap.c (in FWL) handle command line option
+    parsing, in different ways.  Both take as input the same command line
+    syntax as gcc, which is more or less the c99 command line syntax from
+    SUSv4:
+
+      http://www.opengroup.org/onlinepubs/9699919799/utilities/c99.html
+
+    What ccwrap.c does is rewrite a gcc command line to turn "cc hello.c"
+    into a big long command line with -L and -I entries, explicitly specifying
+    header and library paths, the need to link against standard libraries
+    such as libc, and to link against crt1.o and such as appropriate.
+
+    Such a front end option parser could perform such command line rewriting
+    and then call a "cc1" that contains no built-in knowledge about standard
+    paths or libraries.  This would neatly centralize such behavior, and
+    if the rewritten command line could actually be extracted it could be
+    tested against other compilers (such as gcc) to help debugging.
+
+    Note that adding distcc or ccache support to such a wrapper is a fairly
+    straightforward item for future expansion.
+
+    The option parser needs to distinguish "compiling" from "linking".
+
+      When compiling, the option parser needs to specify two include paths;
+      one for the compiler (varargs.h, defaulting to ../qcc/include) and
+      one for the system (stdio.h, defaulting to ../include).
+
+      When linking, the option parser needs to specify the compiler library
+      path (where libqcc.a lives, defaulting to ../qcc/lib), the system
+      library path (where libc.a lives, defaulting to ../lib), and add
+      explicit calls to link in the standard libraries and the startup/exit
+      code.  Currently, ccwrap.c does all this.
+
+    Note that these default paths aren't relative to the current directory
+    (which can't change or files listed on the command line wouldn't be found),
+    but relative to the directory where the qcc executable lives.  This allows
+    the compiler to be relocatable, and thus extracted into a user's home
+    directory and called from there.  (The user's home directory name cannot
+    be known at compile time.)  The defaults can also be specified as absolute
+    paths when the compiler is configured.
+
+    The current ccwrap.c also modifies the $PATH (so gcc's front-end can
+    shell out to tools such as its own "cc1" and "ld"), and supports C++.
+    Although qcc doesn't need either of these, both are useful for shelling
+    out to another compiler (such as gcc).
+
+    The wrapper can split "compiling and linking" lines into two commands,
+    either saving intermediate results in the /tmp directory or forking and
+    using pipes.  (That way cc1 doesn't need to know anything about linking.)
+    Optionally, the compiler can initialize the same structures used by the
+    linker, but is the speed/complexity tradeoff here worth it?
+
+    Note that "-run" support is actually a property of the linker.
+
+  cpp - preprocessor
+
+    This performs macro substitution, like "qcc -E".
+
+  cc1 - compiler
+
+    This compiles C source code.  Specifically, it converts one or more .c
+    files into to a single .o file, for a specific target.
+
+    Generating assembly output is best done by running the binary tcg output
+    through a disassembler.  Keep it orthogonal.
+
+  ld - linker
+    This needs to be able to read .o, .a, and .so files, and produce ELF
+    executables and .so files.  It should also support linker scripts.
+
+    This needs to "#include <elf.h>", which non-linux hosts won't always have
+    but which qemu has it's own copy of already.
+
+  ar - library archiver
+    This is a wimpy archiver.  It creates .a files from .o files
+    (and extracts .o files from .a files).  It's a flat archive, with no
+    subdirectories.
+
+    Busybox has partial support for this (still read-only, last I checked).
+
+    The ranlib command indexes these archives.
+
+    SUSv4 has a standards document for this command:
+
+      http://www.opengroup.org/onlinepubs/9699919799/utilities/ar.html
+
+  as - assembler
+    Tinycc has an x86 assembler.  It should be genericized.
+
+  nm - name list
+
+    For some reason, gcc won't build without this.
+
+    SUSv4 has a standards document for this command:
+
+      http://www.opengroup.org/onlinepubs/9699919799/utilities/nm.html
