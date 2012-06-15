@@ -1,0 +1,35 @@
+I'd like to to release qcc under 2-clause BSD.  Fabrice Bellard said he's
+ok with this:
+
+> Regarding the licensing, I'd like to change the TCC license to BSD since a
+> long time, so I see no problem with that. I would have to look at my old
+> repository to see from which version it is safer to start.
+
+Fabrice changed the license to GPL in commits 268 and 270, so anything before
+that would be commits Fabrice retained the right to relicense (and thus I
+have permission for via the above statment). The external contributions before
+then were:
+
+  223, 227: Peter Lund
+  250, 258, 259: Dave Long
+
+Here are the third party commits between the LGPL relicensing and my
+repository forking off from the tinycc CVS:
+
+tcc:
+  281, 282: mauro persano
+  285: romain francoise
+  295, 306, 307: Daniel Glockner
+  305, 308, 309: TK
+  348: Jon Griffiths
+  352: Bernhard Fischer
+  354, 364, 366, 368, 370, 372, 377: Grischka
+  384, 385, 386, 387, 388, 389: Filip Navara
+  394: Tao Wu
+
+So I need to:
+
+ A) read through all that and see what they were
+ B) Either contact people to get permission to BSD their code, or remove that
+    code.
+ C) Go through my tree since then and see what third party code I included.
